@@ -1,35 +1,53 @@
-/**
- * MAC / HMAC — implemented FROM SCRATCH per assignment rules.
- * Do NOT import Node's `crypto` module for HMAC/hashing here.
- * Implement a hash function (or reuse a simple from-scratch one, e.g. a basic
- * SHA-256-like construction or CBC-MAC over a from-scratch block cipher-ish
- * transform) and the HMAC construction (ipad/opad) on top of it, documented
- * clearly for the report.
- *
- * Used for:
- *  - integrity tag stored alongside every report, recomputed on every read
- *  - MAC-chaining the append-only status-change log (each entry's MAC covers
- *    the previous entry's MAC + the new status, so history can't be rewritten)
- *  - signing short-lived reviewer session tokens
- */
+import { sha256 } from "./hash.js";
 
-/**
- * @param {string} message
- * @param {string} key
- * @returns {string} MAC/tag, hex encoded
- */
-export function computeMAC(message, key) {
-  // TODO: implement hash-then-HMAC (or CBC-MAC) from scratch
-  throw new Error("computeMAC: not implemented");
+const BLOCK_SIZE = 64; // SHA-256 block size in bytes
+
+function toBytes(strOrBytes) {
+  return typeof strOrBytes === "string" ? new TextEncoder().encode(strOrBytes) : strOrBytes;
+}
+
+function xorPad(keyBytes, padByte) {
+  const out = new Uint8Array(BLOCK_SIZE);
+  for (let i = 0; i < BLOCK_SIZE; i++) out[i] = (keyBytes[i] || 0) ^ padByte;
+  return out;
+}
+
+function concatBytes(...arrs) {
+  const total = arrs.reduce((sum, a) => sum + a.length, 0);
+  const out = new Uint8Array(total);
+  let offset = 0;
+  for (const a of arrs) {
+    out.set(a, offset);
+    offset += a.length;
+  }
+  return out;
 }
 
 /**
- * Constant-time-ish comparison to verify a MAC without leaking timing info.
  * @param {string} message
  * @param {string} key
- * @param {string} tag
- * @returns {boolean}
+ * @returns {string} hex-encoded MAC tag
  */
+export function computeMAC(message, key) {
+  let keyBytes = toBytes(key);
+  if (keyBytes.length > BLOCK_SIZE) keyBytes = sha256(keyBytes);
+  if (keyBytes.length < BLOCK_SIZE) {
+    const padded = new Uint8Array(BLOCK_SIZE);
+    padded.set(keyBytes);
+    keyBytes = padded;
+  }
+
+  const ipad = xorPad(keyBytes, 0x36);
+  const opad = xorPad(keyBytes, 0x5c);
+  const msgBytes = toBytes(message);
+
+  const inner = sha256(concatBytes(ipad, msgBytes));
+  const outer = sha256(concatBytes(opad, inner));
+
+  return Buffer.from(outer).toString("hex");
+}
+
+/** Timing-safer equality check for verifying a MAC. */
 export function verifyMAC(message, key, tag) {
   const computed = computeMAC(message, key);
   if (computed.length !== tag.length) return false;
@@ -39,11 +57,9 @@ export function verifyMAC(message, key, tag) {
 }
 
 /**
- * Build the next entry of a MAC-chained audit/status log.
- * @param {string} previousMAC - MAC of the previous log entry (or a fixed genesis value for the first)
- * @param {object} entry - e.g. { reportId, newStatus, changedBy, timestamp }
+ * @param {string} previousMAC - MAC of the previous log entry (use a fixed genesis string for the first)
+ * @param {object} entry { reportId, newStatus, changedBy, timestamp }
  * @param {string} key
- * @returns {{ entry: object, mac: string }}
  */
 export function appendChainedEntry(previousMAC, entry, key) {
   const payload = previousMAC + JSON.stringify(entry);

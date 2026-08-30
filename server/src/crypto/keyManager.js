@@ -1,43 +1,139 @@
-/**
- * Key Management Module.
- * Responsible for: generating RSA/ECC keypairs for reviewers, storing private
- * keys securely (never in plaintext in the DB — at minimum encrypt-at-rest with
- * a server master key held outside the DB, e.g. in an env var), distributing
- * public keys to whoever needs to encrypt data for a reviewer, and rotating
- * keys on a schedule or on demand.
- */
 import * as rsa from "./rsa.js";
 import * as ecc from "./ecc.js";
+import { encryptAtRest, decryptAtRest } from "./atRestCipher.js";
+import User from "../models/User.js";
+import ReviewerKeys from "../models/ReviewerKeys.js";
+
+// --- serialization helpers: BigInt <-> plain strings for MongoDB ---
+
+function serializeRSAPublicKey(pub) {
+  return { e: pub.e.toString(), n: pub.n.toString() };
+}
+function deserializeRSAPublicKey(obj) {
+  return { e: BigInt(obj.e), n: BigInt(obj.n) };
+}
+function serializeRSAPrivateKey(priv) {
+  return JSON.stringify({ d: priv.d.toString(), n: priv.n.toString() });
+}
+function deserializeRSAPrivateKey(json) {
+  const obj = JSON.parse(json);
+  return { d: BigInt(obj.d), n: BigInt(obj.n) };
+}
+
+function serializeECCPublicKey(pub) {
+  return { x: pub.x.toString(), y: pub.y.toString() };
+}
+function deserializeECCPublicKey(obj) {
+  return { x: BigInt(obj.x), y: BigInt(obj.y) };
+}
+function serializeECCPrivateKey(priv) {
+  return JSON.stringify({ privateKey: priv.toString() });
+}
+function deserializeECCPrivateKey(json) {
+  return BigInt(JSON.parse(json).privateKey);
+}
 
 /**
- * Generate and persist a fresh RSA + ECC keypair for a reviewer.
+ * Generate and persist a fresh RSA + ECC keypair for a reviewer (version 1).
+ * Call this once, right after a user is promoted to the "reviewer" role.
  * @param {string} userId
+ * @returns {{ rsaPublicKey: {e:bigint,n:bigint}, eccPublicKey: {x:bigint,y:bigint} }}
  */
 export async function provisionKeysForReviewer(userId) {
-  // TODO:
-  // const rsaKeys = rsa.generateKeyPair();
-  // const eccKeys = ecc.generateKeyPair();
-  // store public keys openly on the User doc; store private keys encrypted
-  // (e.g. wrapped with a server-held master secret) in a separate collection
-  throw new Error("provisionKeysForReviewer: not implemented");
+  const existing = await ReviewerKeys.findOne({ user: userId, retiredAt: null });
+  if (existing) {
+    throw new Error("provisionKeysForReviewer: active keys already exist — use rotateKeys instead");
+  }
+
+  const rsaKeys = rsa.generateKeyPair(1024);
+  const eccKeys = ecc.generateKeyPair();
+
+  const doc = await ReviewerKeys.create({
+    user: userId,
+    version: 1,
+    rsaPublicKey: serializeRSAPublicKey(rsaKeys.publicKey),
+    rsaPrivateKeyEncrypted: encryptAtRest(serializeRSAPrivateKey(rsaKeys.privateKey)),
+    eccPublicKey: serializeECCPublicKey(eccKeys.publicKey),
+    eccPrivateKeyEncrypted: encryptAtRest(serializeECCPrivateKey(eccKeys.privateKey)),
+  });
+
+  // Cache public keys on the User doc too, for convenient lookups elsewhere
+  await User.findByIdAndUpdate(userId, {
+    rsaPublicKey: doc.rsaPublicKey,
+    eccPublicKey: doc.eccPublicKey,
+  });
+
+  return { rsaPublicKey: rsaKeys.publicKey, eccPublicKey: eccKeys.publicKey };
 }
 
 /**
- * Rotate a reviewer's keys (generate new pair, mark old as retired but keep
- * long enough to decrypt reports encrypted before rotation, or re-encrypt
- * existing reports with the new key — decide & document the policy).
+ * Rotate a reviewer's keys: retires the current active key and generates a
+ * new one. Old (retired) keys are kept so reports encrypted before rotation
+ * can still be decrypted by whoever reviews them.
  * @param {string} userId
+ * @returns {{ rsaPublicKey: {e:bigint,n:bigint}, eccPublicKey: {x:bigint,y:bigint} }}
  */
 export async function rotateKeys(userId) {
-  // TODO
-  throw new Error("rotateKeys: not implemented");
+  const current = await ReviewerKeys.findOne({ user: userId, retiredAt: null });
+  if (!current) {
+    throw new Error("rotateKeys: no active keys found — call provisionKeysForReviewer first");
+  }
+
+  current.retiredAt = new Date();
+  await current.save();
+
+  const rsaKeys = rsa.generateKeyPair(1024);
+  const eccKeys = ecc.generateKeyPair();
+
+  const doc = await ReviewerKeys.create({
+    user: userId,
+    version: current.version + 1,
+    rsaPublicKey: serializeRSAPublicKey(rsaKeys.publicKey),
+    rsaPrivateKeyEncrypted: encryptAtRest(serializeRSAPrivateKey(rsaKeys.privateKey)),
+    eccPublicKey: serializeECCPublicKey(eccKeys.publicKey),
+    eccPrivateKeyEncrypted: encryptAtRest(serializeECCPrivateKey(eccKeys.privateKey)),
+  });
+
+  await User.findByIdAndUpdate(userId, {
+    rsaPublicKey: doc.rsaPublicKey,
+    eccPublicKey: doc.eccPublicKey,
+  });
+
+  return { rsaPublicKey: rsaKeys.publicKey, eccPublicKey: eccKeys.publicKey };
 }
 
 /**
- * Fetch a reviewer's current public keys (safe to expose).
+ * Fetch a reviewer's current (active) public keys — safe to expose to
+ * anyone who needs to encrypt a report for this reviewer.
  * @param {string} userId
+ * @returns {{ rsaPublicKey: {e:bigint,n:bigint}, eccPublicKey: {x:bigint,y:bigint} } | null}
  */
 export async function getPublicKeys(userId) {
-  // TODO
-  throw new Error("getPublicKeys: not implemented");
+  const doc = await ReviewerKeys.findOne({ user: userId, retiredAt: null });
+  if (!doc) return null;
+  return {
+    rsaPublicKey: deserializeRSAPublicKey(doc.rsaPublicKey),
+    eccPublicKey: deserializeECCPublicKey(doc.eccPublicKey),
+  };
+}
+
+/**
+ * INTERNAL USE ONLY — never expose over an API route. Fetches the reviewer's
+ * private keys so the server can decrypt a report the reviewer is opening.
+ * Looks up by version so reports encrypted under a retired (rotated-out) key
+ * can still be decrypted.
+ * @param {string} userId
+ * @param {number} [version] - omit to use the current active version
+ * @returns {{ rsaPrivateKey: {d:bigint,n:bigint}, eccPrivateKey: bigint } | null}
+ */
+export async function getPrivateKeysForDecryption(userId, version) {
+  const query = version ? { user: userId, version } : { user: userId, retiredAt: null };
+  const doc = await ReviewerKeys.findOne(query);
+  if (!doc) return null;
+
+  return {
+    rsaPrivateKey: deserializeRSAPrivateKey(decryptAtRest(doc.rsaPrivateKeyEncrypted)),
+    eccPrivateKey: deserializeECCPrivateKey(decryptAtRest(doc.eccPrivateKeyEncrypted)),
+    version: doc.version,
+  };
 }
