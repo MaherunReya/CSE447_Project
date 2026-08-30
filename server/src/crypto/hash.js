@@ -90,3 +90,57 @@ export function sha256(messageBytes) {
 export function sha256Hex(messageBytes) {
   return Buffer.from(sha256(messageBytes)).toString("hex");
 }
+
+/**
+ * Password hashing: salted, iterated SHA-256 (our own from-scratch sha256()
+ * above — no bcrypt/scrypt/argon2 or Node `crypto` hash functions). Each
+ * round re-mixes in the salt so the construction isn't a plain hash chain.
+ * `crypto.randomBytes` below is used only to generate the random salt, the
+ * same "randomness only, not algorithm" pattern used elsewhere in crypto/.
+ */
+import nodeCrypto from "crypto";
+
+const PASSWORD_HASH_ITERATIONS = 100_000;
+
+function concatBytes(...arrs) {
+  const total = arrs.reduce((sum, a) => sum + a.length, 0);
+  const out = new Uint8Array(total);
+  let offset = 0;
+  for (const a of arrs) {
+    out.set(a, offset);
+    offset += a.length;
+  }
+  return out;
+}
+
+function iteratedHash(password, saltHex, iterations = PASSWORD_HASH_ITERATIONS) {
+  const saltBytes = Uint8Array.from(Buffer.from(saltHex, "hex"));
+  let digest = sha256(concatBytes(saltBytes, new TextEncoder().encode(password)));
+  for (let i = 1; i < iterations; i++) {
+    digest = sha256(concatBytes(saltBytes, digest));
+  }
+  return Buffer.from(digest).toString("hex");
+}
+
+/**
+ * @param {string} password
+ * @returns {{ hash: string, salt: string }} both hex-encoded — store both on the User doc
+ */
+export function hashPassword(password) {
+  const salt = nodeCrypto.randomBytes(16).toString("hex");
+  return { hash: iteratedHash(password, salt), salt };
+}
+
+/**
+ * Timing-safe check of a password against a stored salt+hash.
+ * @param {string} password
+ * @param {string} salt - hex, as stored on the User doc
+ * @param {string} hash - hex, as stored on the User doc
+ */
+export function verifyPassword(password, salt, hash) {
+  const computed = iteratedHash(password, salt);
+  if (computed.length !== hash.length) return false;
+  let diff = 0;
+  for (let i = 0; i < computed.length; i++) diff |= computed.charCodeAt(i) ^ hash.charCodeAt(i);
+  return diff === 0;
+}

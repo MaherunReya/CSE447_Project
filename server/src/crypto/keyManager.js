@@ -34,6 +34,37 @@ function deserializeECCPrivateKey(json) {
 }
 
 /**
+ * Platform-level keypair, used to encrypt user PII (email, contact info) at
+ * registration time — every user has this data encrypted even though most
+ * users (reporters) never get their own keypair. Reuses the exact same
+ * ReviewerKeys storage/rotation path as a real reviewer, just under a fixed
+ * sentinel id instead of a real User document — no separate model needed,
+ * and it inherits the same "private key never leaves the server" guarantee.
+ * Only admin-facing code should ever call decryptPlatformField().
+ */
+const PLATFORM_KEY_ID = "000000000000000000000001";
+
+async function ensurePlatformKeys() {
+  const existing = await getPublicKeys(PLATFORM_KEY_ID);
+  if (existing) return existing;
+  return provisionKeysForReviewer(PLATFORM_KEY_ID);
+}
+
+/** RSA-encrypt a PII field (email, contact info, etc.) for storage. */
+export async function encryptPlatformField(plaintext) {
+  if (plaintext == null) return null;
+  const { rsaPublicKey } = await ensurePlatformKeys();
+  return rsa.encrypt(plaintext, rsaPublicKey);
+}
+
+/** INTERNAL / ADMIN-ONLY — decrypt a PII field encrypted with encryptPlatformField(). */
+export async function decryptPlatformField(ciphertext) {
+  if (ciphertext == null) return null;
+  const { rsaPrivateKey } = await getPrivateKeysForDecryption(PLATFORM_KEY_ID);
+  return rsa.decrypt(ciphertext, rsaPrivateKey);
+}
+
+/**
  * Generate and persist a fresh RSA + ECC keypair for a reviewer (version 1).
  * Call this once, right after a user is promoted to the "reviewer" role.
  * @param {string} userId

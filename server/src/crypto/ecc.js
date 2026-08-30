@@ -2,11 +2,11 @@ import { modPow, modInverse, randomBigInt, bytesToBigInt, bigIntToBytes } from "
 import { sha256 } from "./hash.js";
 
 // secp256k1 parameters
-const P = 0xfffffffffffffffffffffffffffffffffffffffffffffffffffffefffffc2fn;
+const P = 0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffefffffc2fn;
 const A = 0n;
 const B = 7n;
 const Gx = 0x79be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798n;
-const Gy = 0x483ada7726a3c4655da4fbfc0e1108a8fd17b448a68554199c47d08ffb10d4bn;
+const Gy = 0x483ada7726a3c4655da4fbfc0e1108a8fd17b448a68554199c47d08ffb10d4b8n;
 const N = 0xfffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364141n;
 const G = { x: Gx, y: Gy };
 const INFINITY = { x: null, y: null };
