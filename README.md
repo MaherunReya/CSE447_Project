@@ -45,7 +45,7 @@ whistleblower-tool/
         └── api/            # axios instance
 ```
 
-## Getting started
+
 
 ### 1. Clone & install
 ```bash
@@ -55,7 +55,6 @@ cd whistleblower-tool
 # server
 cd server
 npm install
-cp .env.example .env   # fill in MONGO_URI, PORT, SESSION_SECRET (see note below)
 npm run dev
 
 # client (new terminal)
@@ -78,7 +77,3 @@ treat it like any other secret, keep it out of git.
 - [ ] Auth: registration/login, password hash+salt, 2FA (TOTP)
 - [ ] RBAC middleware + Report/Admin controllers & routes
 - [ ] React: auth pages, submit/track report, reviewer dashboard, admin panel
-
-## Status
-Scaffold only — controllers and crypto modules are stubbed with clear `TODO`s and the
-exact function signatures the rest of the app expects. No business logic implemented yet.
