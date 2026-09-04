@@ -18,6 +18,9 @@ const reportSchema = new mongoose.Schema(
     mac: { type: String, required: true },
 
     assignedReviewer: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
+    // Which version of the reviewer's keypair encrypted this report — needed
+    // to decrypt correctly if the reviewer's keys are rotated later.
+    reviewerKeyVersion: { type: Number, required: true },
     status: { type: String, enum: ["Open", "Investigating", "Resolved"], default: "Open" },
 
     // Append-only, MAC-chained

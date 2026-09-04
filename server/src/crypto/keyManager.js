@@ -149,6 +149,23 @@ export async function getPublicKeys(userId) {
 }
 
 /**
+ * Like getPublicKeys(), but also returns the key version — callers that
+ * encrypt something (e.g. a new report) need to record which version was
+ * used, so it can still be decrypted correctly after a later key rotation.
+ * @param {string} userId
+ * @returns {{ rsaPublicKey: {e:bigint,n:bigint}, eccPublicKey: {x:bigint,y:bigint}, version: number } | null}
+ */
+export async function getPublicKeysWithVersion(userId) {
+  const doc = await ReviewerKeys.findOne({ user: userId, retiredAt: null });
+  if (!doc) return null;
+  return {
+    rsaPublicKey: deserializeRSAPublicKey(doc.rsaPublicKey),
+    eccPublicKey: deserializeECCPublicKey(doc.eccPublicKey),
+    version: doc.version,
+  };
+}
+
+/**
  * INTERNAL USE ONLY — never expose over an API route. Fetches the reviewer's
  * private keys so the server can decrypt a report the reviewer is opening.
  * Looks up by version so reports encrypted under a retired (rotated-out) key

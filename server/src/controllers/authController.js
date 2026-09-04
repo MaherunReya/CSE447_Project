@@ -135,23 +135,65 @@ export async function verify2FA(req, res) {
 }
 
 /**
- * Enable 2FA for the currently logged-in user (reviewers/admins should call
- * this right after their account is provisioned). Returns an otpauth:// URL
- * the client turns into a QR code; 2FA isn't enforced until the user proves
- * they scanned it correctly via /confirm-2fa (not built yet — TODO).
+ * Start enabling 2FA for the currently logged-in user (reviewers/admins
+ * should call this right after their account is provisioned). Returns an
+ * otpauth:// URL the client turns into a QR code. The secret is stashed in
+ * totpSecretPending — it does NOT become active, and is2FAEnabled stays
+ * false, until the user proves they scanned it correctly via confirm2FA.
  */
 export async function setup2FA(req, res) {
   try {
     const secret = authenticator.generateSecret();
     const user = await User.findByIdAndUpdate(
       req.user.sub,
-      { totpSecret: secret, is2FAEnabled: true },
+      { totpSecretPending: secret },
       { new: true }
     );
     const otpauthUrl = authenticator.keyuri(user.username, "WhistleblowerTool", secret);
     res.json({ otpauthUrl });
   } catch (err) {
     res.status(500).json({ error: "2FA setup failed", details: err.message });
+  }
+}
+
+/**
+ * Confirm 2FA setup: the user submits a code generated from the pending
+ * secret. Only on success does the secret become active and 2FA get
+ * actually enforced on future logins.
+ */
+export async function confirm2FA(req, res) {
+  try {
+    const { code } = req.body;
+    if (!code) return res.status(400).json({ error: "code is required" });
+
+    const user = await User.findById(req.user.sub);
+    if (!user?.totpSecretPending) {
+      return res.status(400).json({ error: "No pending 2FA setup — call setup-2fa first" });
+    }
+
+    const valid = authenticator.verify({ token: code, secret: user.totpSecretPending });
+    if (!valid) return res.status(401).json({ error: "Invalid 2FA code" });
+
+    user.totpSecret = user.totpSecretPending;
+    user.totpSecretPending = undefined;
+    user.is2FAEnabled = true;
+    await user.save();
+
+    res.json({ ok: true, is2FAEnabled: true });
+  } catch (err) {
+    res.status(500).json({ error: "2FA confirmation failed", details: err.message });
+  }
+}
+
+/** Restores a session on page load/refresh — the client calls this once on
+ *  mount to find out who's logged in (if anyone) without re-submitting credentials. */
+export async function getMe(req, res) {
+  try {
+    const user = await User.findById(req.user.sub).select("username role is2FAEnabled");
+    if (!user) return res.status(404).json({ error: "User not found" });
+    res.json({ id: user._id, username: user.username, role: user.role, is2FAEnabled: user.is2FAEnabled });
+  } catch (err) {
+    res.status(500).json({ error: "Failed to fetch current user", details: err.message });
   }
 }
 
