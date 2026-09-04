@@ -15,8 +15,7 @@ algorithms, from-scratch crypto, MAC-chained audit logs, RBAC, 2FA, secure sessi
 about *what we implement*, not the stack. Node's native `BigInt` lets us implement modular
 exponentiation (RSA) and elliptic-curve point arithmetic (ECC) by hand without relying on
 Node's `crypto` module or any npm crypto library. **Nothing under `server/src/crypto/` may
-import `crypto`, `crypto-js`, `node-forge`, `elliptic`, `jsrsasign`, or similar — those
-implementations must be written by us.**
+import `crypto`, `crypto-js`, `node-forge`, `elliptic`, `jsrsasign`.**
 
 ## Roles
 | Role | Capabilities |
@@ -63,17 +62,3 @@ npm install
 npm run dev
 ```
 
-### 2. `SESSION_SECRET` note
-Since token/session signing must also avoid built-in crypto helpers where the assignment
-scopes that as "encryption," we sign session tokens using our own HMAC (`crypto/mac.js`)
-rather than the `jsonwebtoken` library. `SESSION_SECRET` is the key fed into that HMAC —
-treat it like any other secret, keep it out of git.
-
-## Division of work (suggested — edit as your team decides)
-- [ ] RSA implementation (`crypto/rsa.js`) — keygen, encrypt, decrypt
-- [ ] ECC implementation (`crypto/ecc.js`) — keygen, encrypt/decrypt (ECIES-style) or sign
-- [ ] MAC/HMAC implementation (`crypto/mac.js`) + MAC-chained audit log
-- [ ] Key Management Module (`crypto/keyManager.js`) — generation, storage, rotation
-- [ ] Auth: registration/login, password hash+salt, 2FA (TOTP)
-- [ ] RBAC middleware + Report/Admin controllers & routes
-- [ ] React: auth pages, submit/track report, reviewer dashboard, admin panel
