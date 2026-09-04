@@ -14,8 +14,7 @@ The assignment's hard requirements (asymmetric-only encryption, ≥2 different a
 algorithms, from-scratch crypto, MAC-chained audit logs, RBAC, 2FA, secure sessions) are
 about *what we implement*, not the stack. Node's native `BigInt` lets us implement modular
 exponentiation (RSA) and elliptic-curve point arithmetic (ECC) by hand without relying on
-Node's `crypto` module or any npm crypto library. **Nothing under `server/src/crypto/` may
-import `crypto`, `crypto-js`, `node-forge`, `elliptic`, `jsrsasign`.**
+Node's `crypto` module or any npm crypto library. 
 
 ## Roles
 | Role | Capabilities |
