@@ -48,7 +48,7 @@ whistleblower-tool/
 
 ### 1. Clone & install
 ```bash
-git clone <repo-url>
+git clone https://github.com/MaherunReya/CSE447_Project
 cd whistleblower-tool
 
 # server
