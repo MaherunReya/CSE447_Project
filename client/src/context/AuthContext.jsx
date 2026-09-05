@@ -1,13 +1,24 @@
-import { createContext, useContext, useState } from "react";
+import { createContext, useContext, useState, useEffect } from "react";
+import api from "../api/axios.js";
 
 const AuthContext = createContext(null);
 
 export function AuthProvider({ children }) {
-  // TODO: hydrate from a /api/auth/me endpoint on mount
   const [user, setUser] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  // Restore a session on page load/refresh by asking the server who (if
+  // anyone) the current session cookie belongs to.
+  useEffect(() => {
+    api
+      .get("/auth/me")
+      .then((res) => setUser(res.data))
+      .catch(() => setUser(null))
+      .finally(() => setLoading(false));
+  }, []);
 
   return (
-    <AuthContext.Provider value={{ user, setUser }}>
+    <AuthContext.Provider value={{ user, setUser, loading }}>
       {children}
     </AuthContext.Provider>
   );
